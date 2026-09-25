@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mlstash"
+version = "0.3.0"
+description = "Sync ML artifacts between ephemeral runtimes (e.g. Colab) and Hugging Face Hub"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["modelscope>=1.40"]
+
+[project.scripts]
+mlstash = "mlstash.cli:entry"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mlstash"]
