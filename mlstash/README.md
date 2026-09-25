@@ -1,3 +1,8 @@
+---
+name: mlstash
+summary: 在 Colab 等临时运行时与 ModelScope 之间同步 ML 产物（checkpoint / run / 最终模型），防止 runtime 回收导致重复工作
+---
+
 # mlstash
 
 在 Colab 等**临时运行时**与 ModelScope 之间同步 ML 产物（中间结果、checkpoint、最终模型），避免 runtime 回收导致的重复工作。
