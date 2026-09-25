@@ -6,6 +6,7 @@
 
 - 每个工具一个独立目录（如 `mlstash/`），目录内自包含：自己的 `pyproject.toml`、README、源码。
 - 工具之间不共享代码、不互相依赖；需要复用时先复制，复用模式稳定出现三次以上再考虑抽取。
+- 仓库公开托管于 GitHub，工具经 `pip install "git+https://github.com/mikewong23571/tools.git#subdirectory=<目录名>"` 分发到 Colab 等远端环境——因此**工具必须保持纯 Python、依赖全部来自 PyPI**，不引入编译步骤或私有依赖。
 
 ## 设计与实现原则
 
