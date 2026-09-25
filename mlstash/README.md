@@ -14,7 +14,7 @@ summary: 在 Colab 等临时运行时与 ModelScope 之间同步 ML 产物（che
   - 无人值守友好：仅需 `MODELSCOPE_TOKEN` 环境变量，无交互式登录
   - 每次 `push` 是一个 commit，天然带版本历史，可恢复到任一快照
   - `upload_folder` 支持断点续传与失败重试，适合大 checkpoint
-- **只做 push / pull 原语 + 一个上下文管理器**：定时保存、训练框架 hook 等由调用方决定，工具不内置。CLI 与 Python API 共用 `core.py` 同一份逻辑。
+- **只做 push / pull 原语 + 两个上下文入口**：`Run`（训练场景，run 级协作）、`stash`（通用产物目录，整目录协作）。定时保存、训练框架 hook 等由调用方决定，工具不内置。CLI 与 Python API 共用 `core.py` 同一份逻辑。
 
 ## 协作模式假设
 
@@ -70,7 +70,7 @@ artifacts/
 
 ## 作为库使用（通用产物目录）
 
-训练代码**不需要感知远端存储**，只感知产物目录：
+`stash` 面向**非训练结构的通用目录**（如数据集、评估输出），是整目录级协作：进入拉取整个目录、退出推送。训练场景请用上面的 `Run`（run 级协作、带元数据与保留策略）。
 
 ```python
 from mlstash import stash
@@ -154,7 +154,6 @@ mlstash pull artifacts --revision <commit-sha>
 ## 本机直接训练（无 Colab）
 
 ```bash
-mlstash pull artifacts || true   # 有历史进度则续上
-python train.py --out artifacts  # 脚本内 Run.sync 在关键节点推送
-mlstash push artifacts --message "final"
+source .env.local
+python train.py   # 脚本内用 Run：sync 只推本 run 子树；续跑用 resume=True
 ```
