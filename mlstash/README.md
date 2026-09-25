@@ -5,7 +5,7 @@ summary: 在 Colab 等临时运行时与 ModelScope 之间同步 ML 产物（che
 
 # mlstash
 
-在 Colab 等**临时运行时**与 ModelScope 之间同步 ML 产物（中间结果、checkpoint、最终模型），避免 runtime 回收导致的重复工作。
+在 Colab 等**临时运行时**与 ModelScope 之间同步 ML 产物（中间结果、checkpoint、最终模型），避免 runtime 回收导致的重复工作。用户故事与验收证据见 [ACCEPTANCE.md](ACCEPTANCE.md)。
 
 ## 设计决策
 
