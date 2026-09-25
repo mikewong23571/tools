@@ -92,33 +92,29 @@ chmod 600 ~/.config/mlstash/env
 
 ## 端到端流程（Colab CLI 模式，命令已实测）
 
-mlstash 未发布 PyPI，用 wheel 分发到 runtime：
+mlstash 以 git+https 直接从公开仓库安装（子目录包，无需凭证）：
 
 ```bash
 # --- 每次训练任务（agent 驱动）---
-# 1. 构建 wheel（在 mlstash 目录下，产物是单文件，agent 不读内容只搬运）
-uv build
-
-# 2. 开 runtime，上传 wheel 并安装
+# 1. 开 runtime，一行装好 mlstash
 colab new -s train --gpu T4
-colab upload dist/mlstash-0.3.0-py3-none-any.whl /tmp/mlstash.whl
-colab install /tmp/mlstash.whl          # 或 colab exec 跑 pip install
+colab install "git+https://github.com/mikewong23571/tools.git#subdirectory=mlstash"
 
-# 3. 跑训练脚本；token 由本机 shell 展开注入，agent 只见变量名
+# 2. 跑训练脚本；token 由本机 shell 展开注入，agent 只见变量名
 #    --timeout 按训练时长设置（默认只有 30s）
 colab exec -s train --timeout 86400 \
   --env "MODELSCOPE_TOKEN=$MODELSCOPE_TOKEN" \
   --env "MLSTASH_REPO=your-username/proj" \
   -f train.py
 
-# 4. 结束释放
+# 3. 结束释放
 colab stop -s train
 ```
 
 - `train.py` 内部用 `Run`（见上文"Run / Checkpoint 管理"），sync 由训练脚本在关键节点触发——**agent 不需要为"保存"单独发命令**
-- runtime 被回收：重跑步骤 2–3 即可，`Run(name="exp1")` 进入时自动 pull 断点续跑
+- runtime 被回收：重跑步骤 1–2 即可，`Run(name="exp1")` 进入时自动 pull 断点续跑
 - 结果回国内本机：`mlstash pull artifacts --repo your-username/proj`
-- 若 mlstash 发布到 PyPI，可省去 wheel 搬运，`colab install mlstash` 一步到位
+- 安装指定版本：git URL 后加 `@<tag或commit>`，如 `tools.git@v0.3.0#subdirectory=mlstash`
 
 ## 作为 CLI 使用（本机）
 
