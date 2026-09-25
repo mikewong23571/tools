@@ -92,8 +92,8 @@ token 的真实存放点只有一个：仓库根目录的 `.env.local`（已在 
 
 ```bash
 # 在 https://modelscope.cn/my/myaccesstoken 创建 SDK 令牌后，
-# 编辑仓库根目录的 .env.local，取消注释并粘贴：
-export MODELSCOPE_TOKEN=ms-xxx
+# 编辑仓库根目录的 .env.local，取消注释并粘贴（dotenv 惯例：不带 export）：
+MODELSCOPE_TOKEN=ms-xxx
 ```
 
 使用时先加载（`set -a` 让变量自动 export，子进程才能拿到）：
@@ -113,7 +113,7 @@ mlstash 以 git+https 直接从公开仓库安装（子目录包，无需凭证�
 ```bash
 # --- 每次训练任务（agent 驱动，在仓库根目录执行）---
 # 1. 开 runtime，一行装好 mlstash
-source .env.local
+set -a; source .env.local; set +a
 colab new -s train --gpu T4
 colab install "git+https://github.com/mikewong23571/tools.git#subdirectory=mlstash"
 
@@ -160,6 +160,6 @@ mlstash pull artifacts --revision <commit-sha>
 ## 本机直接训练（无 Colab）
 
 ```bash
-source .env.local
+set -a; source .env.local; set +a
 python train.py   # 脚本内用 Run：sync 只推本 run 子树；续跑用 resume=True
 ```
