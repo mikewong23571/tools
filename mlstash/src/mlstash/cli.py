@@ -28,8 +28,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help=f"恢复到该目录，默认 {core.DEFAULT_DIR}")
     p_pull.add_argument("--repo", help=f"源仓库，默认取环境变量 {core.REPO_ENV}")
     p_pull.add_argument("--revision", help="指定 commit/分支，默认 master")
-    p_pull.set_defaults(func=lambda a: core.pull(a.path, repo=a.repo,
-                                                 revision=a.revision))
+    p_pull.add_argument("--subdir", help="只拉仓库内子路径，如 runs/exp1")
+    p_pull.set_defaults(func=lambda a: core.pull(
+        a.path, repo=a.repo, revision=a.revision,
+        allow_patterns=[f"{a.subdir.strip('/')}/**"] if a.subdir else None))
 
     return parser
 

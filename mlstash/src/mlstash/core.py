@@ -46,10 +46,12 @@ def is_remote_missing(exc: Exception) -> bool:
 
 
 def push(path: str | Path = DEFAULT_DIR, repo: str | None = None,
-         message: str | None = None, mirror: bool = False) -> None:
+         message: str | None = None, mirror: bool = False,
+         path_in_repo: str = "") -> None:
     """把产物目录推送到 ModelScope（仓库不存在时自动创建为私有 dataset）。
 
-    mirror=True 时远端与本地保持一致（本地已删除的文件远端也删除，
+    path_in_repo：推送到仓库内的子路径（run 级协作用，如 "runs/exp1"）。
+    mirror=True 时远端【该子路径范围内】与本地保持一致（本地已删的远端也删，
     旧版本仍可从历史 commit 找回）；默认 False 只增不删。
     """
     from modelscope_hub import HubApi, RepoType, Visibility
@@ -74,16 +76,24 @@ def push(path: str | Path = DEFAULT_DIR, repo: str | None = None,
         repo_id=repo,
         repo_type=RepoType.DATASET,
         folder_path=str(folder),
+        path_in_repo=path_in_repo.strip("/"),
         commit_message=message,
         ignore_patterns=IGNORE_PATTERNS,
         sync_remote_repo=mirror,
     )
-    print(f"[mlstash] pushed {folder} -> https://modelscope.cn/datasets/{repo}")
+    dest = f"https://modelscope.cn/datasets/{repo}"
+    if path_in_repo:
+        dest += f"/tree/master/{path_in_repo.strip('/')}"
+    print(f"[mlstash] pushed {folder} -> {dest}")
 
 
 def pull(path: str | Path = DEFAULT_DIR, repo: str | None = None,
-         revision: str | None = None) -> None:
-    """从 ModelScope 拉取产物目录到本地。公开仓库无需 token。"""
+         revision: str | None = None,
+         allow_patterns: list[str] | None = None) -> None:
+    """从 ModelScope 拉取产物目录到本地。公开仓库无需 token。
+
+    allow_patterns：只拉匹配的文件（如 ["runs/exp1/**"] 只拉单个 run）。
+    """
     from modelscope.hub.snapshot_download import snapshot_download
 
     repo = resolve_repo(repo)
@@ -94,6 +104,7 @@ def pull(path: str | Path = DEFAULT_DIR, repo: str | None = None,
         repo_type=REPO_TYPE,
         revision=revision,
         local_dir=str(target),
+        allow_patterns=allow_patterns,
         token=os.environ.get(TOKEN_ENV),
     )
     print(f"[mlstash] pulled {repo} -> {target}")

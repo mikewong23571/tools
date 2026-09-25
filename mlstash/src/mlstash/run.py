@@ -1,9 +1,10 @@
-"""Run：一次训练运行的档案管理 + 关键节点同步。
+"""Run：一次训练运行的档案管理 + run 级同步。
 
 约定（与 README 的"Run / Checkpoint 管理"一节对应）：
-- run 目录 = 同步单位，checkpoints/ 放快照，metrics.jsonl 记指标
-- 复用 run 名 = 续跑；进入上下文时 pull 恢复
-- sync() 在关键节点调用：修剪本地 checkpoint 后镜像推送到远端
+- 协作单位是 run 目录（runs/<name>/），不是整个仓库：sync 只推自己的子树，
+  resume 只拉自己的子树，并行实验互不干扰
+- 新假设 = 新 run，默认不拉任何历史；resume=True 才拉回同名 run
+- 每个 run 必须有 description（意图），落在 run.json 元数据里
 """
 
 from __future__ import annotations
@@ -13,7 +14,9 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .stash import stash
+from . import core
+
+META_FILE = "run.json"
 
 
 def _natural_key(p: Path):
@@ -23,18 +26,36 @@ def _natural_key(p: Path):
 
 
 class Run:
-    """with Run("artifacts", name="exp1") as run: ..."""
+    """with Run("artifacts", name="exp1", description="baseline lr=0.01") as run: ..."""
 
     def __init__(self, root: str | Path = "artifacts", *,
-                 name: str | None = None, repo: str | None = None,
-                 keep_last: int = 3):
-        run_id = name or datetime.now().strftime("%Y%m%d-%H%M%S")
+                 name: str | None = None, description: str,
+                 repo: str | None = None, keep_last: int = 3,
+                 resume: bool = False):
+        if resume and not name:
+            raise core.UsageError("resume=True 需要显式指定 name（续跑哪个 run）")
         self.root = Path(root)
-        self.dir = self.root / "runs" / run_id
-        self.run_id = run_id
+        self.run_id = name or datetime.now().strftime("%Y%m%d-%H%M%S")
+        self.dir = self.root / "runs" / self.run_id
+        self.path_in_repo = f"runs/{self.run_id}"
+        self.description = description
+        self.repo = repo
         self.keep_last = keep_last
-        self._stash = stash(self.root, repo=repo)
+        self.resume = resume
         (self.dir / "checkpoints").mkdir(parents=True, exist_ok=True)
+        self._write_meta()
+
+    def _write_meta(self) -> None:
+        meta_path = self.dir / META_FILE
+        if meta_path.exists():
+            return  # 续跑/重进：保留原始 created_at 与描述
+        meta = {
+            "name": self.run_id,
+            "description": self.description,
+            "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n",
+                             encoding="utf-8")
 
     def log(self, metrics: dict) -> None:
         """追加一行指标到 metrics.jsonl。"""
@@ -44,9 +65,10 @@ class Run:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def sync(self, message: str | None = None) -> None:
-        """关键节点触发：修剪本地 checkpoint，然后把 root 镜像推送到远端。"""
+        """关键节点触发：修剪本地 checkpoint，镜像推送本 run 子树到远端。"""
         self._prune()
-        self._stash.save(message, mirror=True)
+        core.push(self.dir, repo=self.repo, message=message,
+                  mirror=True, path_in_repo=self.path_in_repo)
 
     def latest_checkpoint(self) -> Path | None:
         """最近一个 checkpoint（不含 best*），用于续跑定位断点。"""
@@ -65,11 +87,17 @@ class Run:
             p.unlink()
 
     def __enter__(self) -> "Run":
-        self._stash.__enter__()
+        if self.resume:
+            try:
+                core.pull(self.root, repo=self.repo,
+                          allow_patterns=[f"{self.path_in_repo}/**"])
+            except Exception as exc:
+                if not core.is_remote_missing(exc):
+                    raise
+                print(f"[mlstash] 远端无此 run，全新开始：{self.path_in_repo}")
         return self
 
     def __exit__(self, exc_type, exc, tb) -> bool:
-        # 训练异常也要兜底同步一次（修剪 + 镜像推送），保住现场
-        self._prune()
-        self._stash.save(self._stash.message, mirror=True)
+        # 训练异常也要兜底同步一次（修剪 + 镜像推送本 run 子树），保住现场
+        self.sync()
         return False

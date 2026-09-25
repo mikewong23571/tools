@@ -21,9 +21,10 @@ summary: 在 Colab 等临时运行时与 ModelScope 之间同步 ML 产物（che
 本工具按以下使用模式设计，超出这些假设的场景**不在支持范围内**：
 
 - **单身份**：你和你的 coding agent 共用同一个 token、同一批私有仓库。多人权限协作、团队 ACL 不在设计范围
-- **单写者**：同一仓库同一时刻只有一个训练在推送。多机并发写同一 repo 会触发镜像语义互相误删（A 机器 sync 时会删掉远端只属于 B 的文件），不支持
-- **串行接力**：国内机器 ⇄ Colab 之间是「pull → 训练 → push」的串行交接，不是并行工作。**先 pull 后 push 是镜像安全的前提**——上下文管理器进入时自动 pull 正是为此存在
-- **repo = 项目边界**：不同项目用不同仓库（首次 push 自动创建，零成本）；同一项目的多个实验共用仓库、用 run 名区分。不要因为"省事"把多个项目塞进一个仓库——镜像语义下这是事故源
+- **协作单位是 run 目录，不是整仓**：`Run.sync()` 只镜像推送 `runs/<name>/` 子树（镜像删除也限定在子树内，已核实 SDK 源码），并行跑多个实验（不同 run 名）是安全的
+- **单 run 单写者**：同一个 run 名同一时刻只允许一个训练在写；不同 run 名可并行
+- **新假设不需要历史**：`Run` 默认不拉取任何远端数据；只有显式 `resume=True` 才拉回同名 run 的子树续跑
+- **repo = 项目边界**：不同项目用不同仓库（首次 push 自动创建，零成本）；同一项目的多个实验共用仓库、用 run 名区分
 
 ## Run / Checkpoint 管理（训练脚本内）
 
@@ -32,15 +33,20 @@ summary: 在 Colab 等临时运行时与 ModelScope 之间同步 ML 产物（che
 ```python
 from mlstash import Run
 
-# 进入：自动 pull 恢复（复用同一个 name 即续跑；远端无记录则全新开始）
-# 退出：自动修剪 + 同步（即使训练抛异常也执行，保住现场）
-with Run("artifacts", name="exp1", repo="your-username/proj", keep_last=3) as run:
-    start = load(run.latest_checkpoint()) if run.latest_checkpoint() else 0
-    for epoch in range(start, epochs):
+# description 必填：写清本次 run 的意图，落在 run.json 元数据里
+# 默认不拉取任何历史（新假设 = 新 run）；退出时自动修剪 + 推送本 run 子树
+with Run("artifacts", name="exp1", description="baseline lr=0.01",
+         repo="your-username/proj", keep_last=3) as run:
+    for epoch in range(epochs):
         train_one_epoch(out=run.dir)
         run.log({"epoch": epoch, "loss": loss})     # 追加 metrics.jsonl
         if epoch % 5 == 0 or is_best:               # 关键节点才同步
             run.sync(f"epoch {epoch}, loss {loss:.3f}")
+
+# 续跑（如 runtime 回收后）：显式 resume=True，只拉回 runs/exp1/ 子树
+with Run("artifacts", name="exp1", description="baseline lr=0.01", resume=True) as run:
+    start = load(run.latest_checkpoint()) if run.latest_checkpoint() else 0
+    ...
 ```
 
 目录约定：
@@ -48,17 +54,19 @@ with Run("artifacts", name="exp1", repo="your-username/proj", keep_last=3) as ru
 ```
 artifacts/
   runs/
-    exp1/                  # run_id：复用名字 = 续跑
+    exp1/
+      run.json             # 元数据：name / description / created_at（生成后不覆盖）
       checkpoints/         # epoch=003.pt；best* 开头的文件永不修剪
       metrics.jsonl        # 每行 {"ts", ...}
 ```
 
 原则：
 
-- **一切属于某次运行的东西都进它的 run 目录**——同步单位就是目录
+- **一切属于某次运行的东西都进它的 run 目录**——同步单位就是 run 目录
+- **每个 run 必须有意图描述**：`description` 是必填参数，写入 `run.json` 随产物一起同步
 - **关键节点才 `sync()`**：epoch 结束、刷新 best、训练结束。不要每个 step 同步（同步是网络 IO）
-- **保留策略**：本地只留最近 `keep_last` 个 checkpoint + `best*`；`sync()` 是镜像推送（远端与本地一致），被修剪的旧 checkpoint 仍可从远端历史 commit 找回
-- **续跑**：runtime 回收后重建同样的 `Run(name=...)`，进入即 pull，用 `latest_checkpoint()` 定位断点
+- **保留策略**：本地只留最近 `keep_last` 个 checkpoint + `best*`；`sync()` 是本 run 子树的镜像推送（远端该子树与本地一致），被修剪的旧 checkpoint 仍可从远端历史 commit 找回
+- **续跑**：`resume=True` 只拉回该 run 子树，用 `latest_checkpoint()` 定位断点；远端无此 run 时视为全新开始
 
 ## 作为库使用（通用产物目录）
 
@@ -80,18 +88,15 @@ with stash("artifacts", repo="your-username/my-project-artifacts") as st:
 
 ## Token 管理（一次性，本机）
 
-token 的真实存放点只有一个：本机的受权限保护文件。不进 git、不进代码、不进与 agent 的对话。
+token 的真实存放点只有一个：仓库根目录的 `.env.local`（已在 `.gitignore` 中，600 权限）。不进 git、不进代码、不进与 agent 的对话。
 
 ```bash
-# 在 https://modelscope.cn/my/myaccesstoken 创建 SDK 令牌后：
-mkdir -p ~/.config/mlstash
-echo 'export MODELSCOPE_TOKEN=ms-xxx' > ~/.config/mlstash/env
-chmod 600 ~/.config/mlstash/env
-# ~/.zshrc 加一行，之后所有新 shell（含 agent 启动的）自动带上：
-[ -f ~/.config/mlstash/env ] && source ~/.config/mlstash/env
+# 在 https://modelscope.cn/my/myaccesstoken 创建 SDK 令牌后，
+# 编辑仓库根目录的 .env.local，取消注释并粘贴：
+export MODELSCOPE_TOKEN=ms-xxx
 ```
 
-注入到 Colab runtime 走 colab CLI 的 `--env`（已实测支持）：命令里只写变量名 `$MODELSCOPE_TOKEN`，由本机 shell 展开，token 不出现在 agent 上下文中。
+使用时先 `source .env.local`（或由 agent 在执行命令前 source）。注入到 Colab runtime 走 colab CLI 的 `--env`（已实测支持）：命令里只写变量名 `$MODELSCOPE_TOKEN`，由本机 shell 展开，token 不出现在 agent 上下文中。
 
 注意：`google.colab.userdata`（Secrets 面板）依赖 notebook 前端通道，**CLI/headless 模式下不可用**，仅当你也用 notebook 时才需要维护它。
 
@@ -100,8 +105,9 @@ chmod 600 ~/.config/mlstash/env
 mlstash 以 git+https 直接从公开仓库安装（子目录包，无需凭证）：
 
 ```bash
-# --- 每次训练任务（agent 驱动）---
+# --- 每次训练任务（agent 驱动，在仓库根目录执行）---
 # 1. 开 runtime，一行装好 mlstash
+source .env.local
 colab new -s train --gpu T4
 colab install "git+https://github.com/mikewong23571/tools.git#subdirectory=mlstash"
 
@@ -117,9 +123,9 @@ colab stop -s train
 ```
 
 - `train.py` 内部用 `Run`（见上文"Run / Checkpoint 管理"），sync 由训练脚本在关键节点触发——**agent 不需要为"保存"单独发命令**
-- runtime 被回收：重跑步骤 1–2 即可，`Run(name="exp1")` 进入时自动 pull 断点续跑
-- 结果回国内本机：`mlstash pull artifacts --repo your-username/proj`
-- 安装指定版本：git URL 后加 `@<tag或commit>`，如 `tools.git@v0.3.0#subdirectory=mlstash`
+- runtime 被回收：重跑步骤 1–2 即可，训练脚本里 `Run(..., name="exp1", resume=True)` 只拉回该 run 断点续跑
+- 结果回国内本机，只拉关心的那个 run：`mlstash pull artifacts --repo your-username/proj --subdir runs/exp1`
+- 安装指定版本：git URL 后加 `@<tag或commit>`，如 `tools.git@v0.4.0#subdirectory=mlstash`
 
 ## 作为 CLI 使用（本机）
 
@@ -131,6 +137,9 @@ mlstash push artifacts --message "epoch 10, loss 0.32"
 
 # 恢复：runtime 回收重开后拉回产物目录
 mlstash pull artifacts
+
+# 只拉取某个 run（run 级协作）
+mlstash pull artifacts --subdir runs/exp1
 
 # 恢复到指定版本
 mlstash pull artifacts --revision <commit-sha>
