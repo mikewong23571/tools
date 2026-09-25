@@ -96,7 +96,13 @@ token 的真实存放点只有一个：仓库根目录的 `.env.local`（已在 
 export MODELSCOPE_TOKEN=ms-xxx
 ```
 
-使用时先 `source .env.local`（或由 agent 在执行命令前 source）。注入到 Colab runtime 走 colab CLI 的 `--env`（已实测支持）：命令里只写变量名 `$MODELSCOPE_TOKEN`，由本机 shell 展开，token 不出现在 agent 上下文中。
+使用时先加载（`set -a` 让变量自动 export，子进程才能拿到）：
+
+```bash
+set -a; source .env.local; set +a
+```
+
+注入到 Colab runtime 走 colab CLI 的 `--env`（已实测支持）：命令里只写变量名 `$MODELSCOPE_TOKEN`，由本机 shell 展开，token 不出现在 agent 上下文中。
 
 注意：`google.colab.userdata`（Secrets 面板）依赖 notebook 前端通道，**CLI/headless 模式下不可用**，仅当你也用 notebook 时才需要维护它。
 
