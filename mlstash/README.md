@@ -133,6 +133,61 @@ colab stop -s train
 - 结果回国内本机，只拉关心的那个 run：`mlstash pull artifacts --repo your-username/proj --subdir runs/exp1`
 - 安装指定版本：git URL 后加 `@<tag或commit>`，如 `tools.git@v0.4.0#subdirectory=mlstash`
 
+## 完整示例（oneshot，已在真实环境跑通）
+
+`train.py`——训练脚本只感知 run 目录，保存逻辑全部委托给 `Run`：
+
+```python
+from mlstash import Run
+
+EPOCHS = 30
+
+with Run("artifacts", name="exp1", description="baseline lr=0.01",
+         keep_last=2, resume=True) as run:        # resume=True：回收后续跑
+    start = 0
+    if (ckpt := run.latest_checkpoint()) is not None:
+        start = load_checkpoint(ckpt)            # 从断点恢复
+    for epoch in range(start, EPOCHS):
+        loss = train_one_epoch(out=run.dir)      # checkpoint 写进 run.dir/checkpoints/
+        run.log({"epoch": epoch, "loss": loss})  # 追加 metrics.jsonl
+        if epoch % 5 == 0:                       # 关键节点才同步
+            run.sync(f"epoch {epoch}, loss {loss:.3f}")
+# 退出自动兜底 sync（训练抛异常也执行）
+```
+
+执行（本机，agent 可原样驱动）：
+
+```bash
+set -a; source .env.local; set +a
+colab new -s train --gpu T4
+colab install "git+https://github.com/mikewong23571/tools.git#subdirectory=mlstash"
+colab exec -s train --timeout 86400 \
+  --env "MODELSCOPE_TOKEN=$MODELSCOPE_TOKEN" \
+  --env "MLSTASH_REPO=your-username/proj" \
+  -f train.py
+colab stop -s train
+```
+
+之后远端的结构（每个 run 自包含：意图、指标、checkpoint）：
+
+```
+your-username/proj（私有 dataset 仓库）
+└── runs/
+    └── exp1/
+        ├── run.json              # {"name", "description", "created_at"}
+        ├── metrics.jsonl         # {"ts", "epoch", "loss"} 每行一条
+        └── checkpoints/
+            ├── epoch=025.pt      # keep_last=2：只留最近两个
+            └── epoch=029.pt
+```
+
+拿回结果（只拉这个 run，不碰其他实验）：
+
+```bash
+set -a; source .env.local; set +a
+mlstash pull artifacts --repo your-username/proj --subdir runs/exp1
+```
+
 ## 作为 CLI 使用（本机）
 
 CLI 的真实用途在**本机**：推数据集、拉结果、手动查看。**runtime 上的同步由训练脚本内的 `Run` 完成，不依赖 CLI。**
