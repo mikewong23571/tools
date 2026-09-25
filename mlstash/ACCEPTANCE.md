@@ -80,6 +80,14 @@
 
 ## 已知边界（非缺陷，设计内）
 
-- ModelScope 禁止 API 删除仓库，测试/废弃仓库需在网页端手动清理
+- ModelScope 禁止 API 删除仓库，仓库清理需在网页端手动操作
 - SDK 同步时输出较多进度日志（如需可加 `disable_tqdm` 透传，当前未做）
 - `colab exec --timeout` 默认 30s，长训练必须显式调大
+
+## 测试资产
+
+以下 ModelScope 仓库为回归测试专用，**有意保留、勿删**（后续改动 mlstash 时可复用它们重跑本文件中的验收场景）：
+
+- `mikewong23571/mlstash-e2e`（run 级协作 / 镜像修剪场景）
+- `mikewong23571/mlstash-colab-e2e`（Colab 回收续跑场景）
+- `mikewong23571/mlstash-acceptance`（stash 通用目录 / 异常兜底场景）
